@@ -1,14 +1,15 @@
-"""Demo app entrypoint.
+from flask import Flask
+import time
 
-This is intentionally minimal; expand as needed.
-"""
+app = Flask(__name__)
 
-from __future__ import annotations
+@app.get("/healthz")
+def healthz():
+    return {"ok": True}
 
-
-def main() -> None:
-    print("demo-app-platform")
-
+@app.get("/")
+def index():
+    return {"service": "demo-app", "ts": time.time()}
 
 if __name__ == "__main__":
-    main()
+    app.run(host="0.0.0.0", port=8080)
