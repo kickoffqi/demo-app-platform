@@ -1,4 +1,4 @@
-name: CI - Build & Push Image
+name: CI - Build & Push
 
 on:
     push:
