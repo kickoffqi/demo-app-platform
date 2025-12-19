@@ -47,6 +47,15 @@ jobs:
             - name: Install kubectl
               uses: azure/setup-kubectl@v4
 
+            - name: Check AKS power state (skip if stopped)
+              run: |
+                  STATE="$(az aks show -g "${{ vars.AKS_RG }}" -n "${{ vars.AKS_NAME }}" --query powerState.code -o tsv || true)"
+                  echo "AKS powerState: $STATE"
+                  if [ "$STATE" != "Running" ]; then
+                  echo "AKS is not Running. Skipping deploy."
+                  exit 0
+                  fi
+
             - name: Get AKS credentials
               run: |
                   az aks get-credentials -g "${{ vars.AKS_RG }}" -n "${{ vars.AKS_NAME }}" --overwrite-existing
