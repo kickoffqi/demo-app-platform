@@ -26,8 +26,12 @@ jobs:
 
             - name: ACR login
               run: |
-                  az acr login --name "${{ vars.ACR_LOGIN_SERVER%%.azurecr.io }}"
-                  echo "IMAGE=${{ vars.ACR_LOGIN_SERVER }}/demo-app:${{ github.sha }}" >> $GITHUB_ENV
+                  ACR_NAME="${ACR_LOGIN_SERVER%%.azurecr.io}"
+                  az acr login --name "$ACR_NAME"
+                  echo "IMAGE=${ACR_LOGIN_SERVER}/demo-app:${GITHUB_SHA}" >> $GITHUB_ENV
+              env:
+                  ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER }}
+                  GITHUB_SHA: ${{ github.sha }}
 
             - name: Build & Push
               run: |
