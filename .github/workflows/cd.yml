@@ -39,14 +39,6 @@ jobs:
               env:
                   ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER }}
 
-            - name: Build & Push image (tag = git tag)
-              run: |
-                  docker build -t "$IMAGE" ./app
-                  docker push "$IMAGE"
-
-            - name: Install kubectl
-              uses: azure/setup-kubectl@v4
-
             - name: Check AKS power state (skip if stopped)
               run: |
                   STATE="$(az aks show -g "${{ vars.AKS_RG }}" -n "${{ vars.AKS_NAME }}" --query powerState.code -o tsv || true)"
@@ -55,6 +47,14 @@ jobs:
                   echo "AKS is not Running. Skipping deploy."
                   exit 0
                   fi
+
+            - name: Build & Push image (tag = git tag)
+              run: |
+                  docker build -t "$IMAGE" ./app
+                  docker push "$IMAGE"
+
+            - name: Install kubectl
+              uses: azure/setup-kubectl@v4
 
             - name: Get AKS credentials
               run: |
