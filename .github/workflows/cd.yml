@@ -1,25 +1,26 @@
-name: CD - Deploy to AKS
+name: CD - Deploy by Tag (dev/staging/prod)
 
 on:
-    workflow_dispatch:
-        inputs:
-            environment:
-                description: "Target env"
-                required: true
-                type: choice
-                options: [dev, staging, prod]
-            image_tag:
-                description: "Image tag (usually git sha)"
-                required: true
-                type: string
+    push:
+        tags:
+            - "v*.*.*"
+            - "v*.*.*-rc.*"
+            - "v*.*.*-beta.*"
 
 permissions:
     contents: read
     id-token: write
 
+env:
+    APP_NAME: demo-app
+
 jobs:
-    deploy:
+    deploy_dev:
+        name: Deploy to dev (beta tags)
+        if: startsWith(github.ref_name, 'v') && contains(github.ref_name, '-beta.')
         runs-on: ubuntu-latest
+        environment: dev
+
         steps:
             - uses: actions/checkout@v4
 
@@ -30,6 +31,19 @@ jobs:
                   tenant-id: ${{ vars.AZURE_TENANT_ID }}
                   subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
+            - name: ACR login
+              run: |
+                  ACR_NAME="${ACR_LOGIN_SERVER%%.azurecr.io}"
+                  az acr login --name "$ACR_NAME"
+                  echo "IMAGE=${ACR_LOGIN_SERVER}/${APP_NAME}:${GITHUB_REF_NAME}" >> $GITHUB_ENV
+              env:
+                  ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER }}
+
+            - name: Build & Push image (tag = git tag)
+              run: |
+                  docker build -t "$IMAGE" ./app
+                  docker push "$IMAGE"
+
             - name: Install kubectl
               uses: azure/setup-kubectl@v4
 
@@ -37,31 +51,126 @@ jobs:
               run: |
                   az aks get-credentials -g "${{ vars.AKS_RG }}" -n "${{ vars.AKS_NAME }}" --overwrite-existing
 
-            - name: Set image tag in kustomize overlay
+            - name: Deploy (kustomize overlay dev)
               run: |
-                  FILE="k8s/overlays/${{ inputs.environment }}/kustomization.yaml"
+                  OVERLAY="k8s/overlays/dev"
                   python - << 'PY'
-                  import os, re
-                  path=os.environ["FILE"]
-                  tag=os.environ["TAG"]
+                  import re
+                  path="k8s/overlays/dev/kustomization.yaml"
+                  tag="${GITHUB_REF_NAME}"
                   with open(path,"r",encoding="utf-8") as f: s=f.read()
                   s=re.sub(r'(?m)^\s*newTag:\s*.*$', f'    newTag: {tag}', s)
                   with open(path,"w",encoding="utf-8") as f: f.write(s)
                   print("Updated", path, "to", tag)
                   PY
+
+                  kubectl diff -k "$OVERLAY" || true
+                  kubectl apply -k "$OVERLAY"
+                  kubectl rollout status deploy/${APP_NAME} -n default --timeout=300s
+
+    deploy_staging:
+        name: Deploy to staging (rc tags)
+        if: startsWith(github.ref_name, 'v') && contains(github.ref_name, '-rc.')
+        runs-on: ubuntu-latest
+        environment: staging
+
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Azure login (OIDC)
+              uses: azure/login@v2
+              with:
+                  client-id: ${{ vars.AZURE_CLIENT_ID }}
+                  tenant-id: ${{ vars.AZURE_TENANT_ID }}
+                  subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+            - name: ACR login
+              run: |
+                  ACR_NAME="${ACR_LOGIN_SERVER%%.azurecr.io}"
+                  az acr login --name "$ACR_NAME"
+                  echo "IMAGE=${ACR_LOGIN_SERVER}/${APP_NAME}:${GITHUB_REF_NAME}" >> $GITHUB_ENV
               env:
-                  FILE: k8s/overlays/${{ inputs.environment }}/kustomization.yaml
-                  TAG: ${{ inputs.image_tag }}
+                  ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER }}
 
-            - name: Diff
+            - name: Build & Push image (tag = git tag)
               run: |
-                  kubectl diff -k "k8s/overlays/${{ inputs.environment }}" || true
+                  docker build -t "$IMAGE" ./app
+                  docker push "$IMAGE"
 
-            - name: Apply
-              run: |
-                  kubectl apply -k "k8s/overlays/${{ inputs.environment }}"
-                  kubectl rollout status deploy/demo-app -n default --timeout=300s
+            - name: Install kubectl
+              uses: azure/setup-kubectl@v4
 
-            - name: Show service
+            - name: Get AKS credentials
               run: |
-                  kubectl get svc demo-app -n default -o wide
+                  az aks get-credentials -g "${{ vars.AKS_RG }}" -n "${{ vars.AKS_NAME }}" --overwrite-existing
+
+            - name: Deploy (kustomize overlay staging)
+              run: |
+                  OVERLAY="k8s/overlays/staging"
+                  python - << 'PY'
+                  import re
+                  path="k8s/overlays/staging/kustomization.yaml"
+                  tag="${GITHUB_REF_NAME}"
+                  with open(path,"r",encoding="utf-8") as f: s=f.read()
+                  s=re.sub(r'(?m)^\s*newTag:\s*.*$', f'    newTag: {tag}', s)
+                  with open(path,"w",encoding="utf-8") as f: f.write(s)
+                  print("Updated", path, "to", tag)
+                  PY
+
+                  kubectl diff -k "$OVERLAY" || true
+                  kubectl apply -k "$OVERLAY"
+                  kubectl rollout status deploy/${APP_NAME} -n default --timeout=300s
+
+    deploy_prod:
+        name: Deploy to prod (release tags)
+        # prod 只匹配纯 vX.Y.Z，不匹配 rc/beta
+        if: startsWith(github.ref_name, 'v') && !contains(github.ref_name, '-rc.') && !contains(github.ref_name, '-beta.')
+        runs-on: ubuntu-latest
+        environment: prod
+
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Azure login (OIDC)
+              uses: azure/login@v2
+              with:
+                  client-id: ${{ vars.AZURE_CLIENT_ID }}
+                  tenant-id: ${{ vars.AZURE_TENANT_ID }}
+                  subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+            - name: ACR login
+              run: |
+                  ACR_NAME="${ACR_LOGIN_SERVER%%.azurecr.io}"
+                  az acr login --name "$ACR_NAME"
+                  echo "IMAGE=${ACR_LOGIN_SERVER}/${APP_NAME}:${GITHUB_REF_NAME}" >> $GITHUB_ENV
+              env:
+                  ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER }}
+
+            - name: Build & Push image (tag = git tag)
+              run: |
+                  docker build -t "$IMAGE" ./app
+                  docker push "$IMAGE"
+
+            - name: Install kubectl
+              uses: azure/setup-kubectl@v4
+
+            - name: Get AKS credentials
+              run: |
+                  az aks get-credentials -g "${{ vars.AKS_RG }}" -n "${{ vars.AKS_NAME }}" --overwrite-existing
+
+            - name: Deploy (kustomize overlay prod)
+              run: |
+                  OVERLAY="k8s/overlays/prod"
+                  python - << 'PY'
+                  import re
+                  path="k8s/overlays/prod/kustomization.yaml"
+                  tag="${GITHUB_REF_NAME}"
+                  with open(path,"r",encoding="utf-8") as f: s=f.read()
+                  s=re.sub(r'(?m)^\s*newTag:\s*.*$', f'    newTag: {tag}', s)
+                  with open(path,"w",encoding="utf-8") as f: f.write(s)
+                  print("Updated", path, "to", tag)
+                  PY
+
+                  kubectl diff -k "$OVERLAY" || true
+                  kubectl apply -k "$OVERLAY"
+                  kubectl rollout status deploy/${APP_NAME} -n default --timeout=300s
