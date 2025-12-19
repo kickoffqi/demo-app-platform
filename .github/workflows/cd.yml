@@ -55,9 +55,9 @@ jobs:
               run: |
                   OVERLAY="k8s/overlays/dev"
                   python - << 'PY'
-                  import re
-                  path="k8s/overlays/dev/kustomization.yaml"
-                  tag="${GITHUB_REF_NAME}"
+                  import os, re
+                  path=os.environ["KUSTOM_FILE"]
+                  tag=os.environ["TAG"]
                   with open(path,"r",encoding="utf-8") as f: s=f.read()
                   s=re.sub(r'(?m)^\s*newTag:\s*.*$', f'    newTag: {tag}', s)
                   with open(path,"w",encoding="utf-8") as f: f.write(s)
@@ -67,6 +67,9 @@ jobs:
                   kubectl diff -k "$OVERLAY" || true
                   kubectl apply -k "$OVERLAY"
                   kubectl rollout status deploy/${APP_NAME} -n default --timeout=300s
+              env:
+                  TAG: ${{ github.ref_name }}
+                  KUSTOM_FILE: k8s/overlays/dev/kustomization.yaml
 
     deploy_staging:
         name: Deploy to staging (rc tags)
@@ -108,9 +111,9 @@ jobs:
               run: |
                   OVERLAY="k8s/overlays/staging"
                   python - << 'PY'
-                  import re
-                  path="k8s/overlays/staging/kustomization.yaml"
-                  tag="${GITHUB_REF_NAME}"
+                  import os, re
+                  path=os.environ["KUSTOM_FILE"]
+                  tag=os.environ["TAG"]
                   with open(path,"r",encoding="utf-8") as f: s=f.read()
                   s=re.sub(r'(?m)^\s*newTag:\s*.*$', f'    newTag: {tag}', s)
                   with open(path,"w",encoding="utf-8") as f: f.write(s)
@@ -120,6 +123,9 @@ jobs:
                   kubectl diff -k "$OVERLAY" || true
                   kubectl apply -k "$OVERLAY"
                   kubectl rollout status deploy/${APP_NAME} -n default --timeout=300s
+              env:
+                  TAG: ${{ github.ref_name }}
+                  KUSTOM_FILE: k8s/overlays/staging/kustomization.yaml
 
     deploy_prod:
         name: Deploy to prod (release tags)
@@ -162,9 +168,9 @@ jobs:
               run: |
                   OVERLAY="k8s/overlays/prod"
                   python - << 'PY'
-                  import re
-                  path="k8s/overlays/prod/kustomization.yaml"
-                  tag="${GITHUB_REF_NAME}"
+                  import os, re
+                  path=os.environ["KUSTOM_FILE"]
+                  tag=os.environ["TAG"]
                   with open(path,"r",encoding="utf-8") as f: s=f.read()
                   s=re.sub(r'(?m)^\s*newTag:\s*.*$', f'    newTag: {tag}', s)
                   with open(path,"w",encoding="utf-8") as f: f.write(s)
@@ -174,3 +180,6 @@ jobs:
                   kubectl diff -k "$OVERLAY" || true
                   kubectl apply -k "$OVERLAY"
                   kubectl rollout status deploy/${APP_NAME} -n default --timeout=300s
+              env:
+                  TAG: ${{ github.ref_name }}
+                  KUSTOM_FILE: k8s/overlays/prod/kustomization.yaml
