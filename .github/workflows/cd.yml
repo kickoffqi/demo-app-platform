@@ -2,8 +2,7 @@ name: CD - Deploy after CI Promote
 
 on:
     workflow_run:
-        # Must match CI workflow name exactly
-        workflows: ["CI - Build SHA & Promote Tags (Env OIDC)"]
+        workflows: ["Promote - Retag SHA to SemVer"]
         types: [completed]
 
 permissions:

@@ -1,0 +1,136 @@
+name: Promote - Retag SHA to SemVer
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+      - "v*.*.*-rc.*"
+      - "v*.*.*-beta.*"
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  APP_NAME: demo-app
+
+jobs:
+  promote_dev:
+    name: Promote to dev (beta)
+    if: contains(github.ref_name, '-beta.')
+    runs-on: ubuntu-latest
+    environment: dev
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: ACR login + set image vars
+        run: |
+          ACR_NAME="${ACR_LOGIN_SERVER%%.azurecr.io}"
+          az acr login --name "$ACR_NAME"
+          echo "ACR_NAME=$ACR_NAME" >> $GITHUB_ENV
+          echo "IMAGE_SHA=${ACR_LOGIN_SERVER}/${APP_NAME}:${GITHUB_SHA}" >> $GITHUB_ENV
+          echo "IMAGE_TAG=${ACR_LOGIN_SERVER}/${APP_NAME}:${GITHUB_REF_NAME}" >> $GITHUB_ENV
+        env:
+          ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER }}
+
+      - name: Ensure SHA image exists (fallback build on tag commit)
+        run: |
+          FOUND="$(az acr repository show-tags -n "${ACR_NAME}" --repository "${APP_NAME}" --query "[?@=='${GITHUB_SHA}'] | length(@)" -o tsv 2>/dev/null || echo 0)"
+          if [ "$FOUND" != "1" ]; then
+            echo "SHA image not found. Building & pushing SHA from this tag commit..."
+            docker build -t "${IMAGE_SHA}" ./app
+            docker push "${IMAGE_SHA}"
+          fi
+
+      - name: Promote (retag SHA -> beta tag)
+        run: |
+          docker pull "${IMAGE_SHA}"
+          docker tag  "${IMAGE_SHA}" "${IMAGE_TAG}"
+          docker push "${IMAGE_TAG}"
+
+  promote_staging:
+    name: Promote to staging (rc)
+    if: contains(github.ref_name, '-rc.')
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: ACR login + set image vars
+        run: |
+          ACR_NAME="${ACR_LOGIN_SERVER%%.azurecr.io}"
+          az acr login --name "$ACR_NAME"
+          echo "ACR_NAME=$ACR_NAME" >> $GITHUB_ENV
+          echo "IMAGE_SHA=${ACR_LOGIN_SERVER}/${APP_NAME}:${GITHUB_SHA}" >> $GITHUB_ENV
+          echo "IMAGE_TAG=${ACR_LOGIN_SERVER}/${APP_NAME}:${GITHUB_REF_NAME}" >> $GITHUB_ENV
+        env:
+          ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER }}
+
+      - name: Ensure SHA image exists (fallback build on tag commit)
+        run: |
+          FOUND="$(az acr repository show-tags -n "${ACR_NAME}" --repository "${APP_NAME}" --query "[?@=='${GITHUB_SHA}'] | length(@)" -o tsv 2>/dev/null || echo 0)"
+          if [ "$FOUND" != "1" ]; then
+            echo "SHA image not found. Building & pushing SHA from this tag commit..."
+            docker build -t "${IMAGE_SHA}" ./app
+            docker push "${IMAGE_SHA}"
+          fi
+
+      - name: Promote (retag SHA -> rc tag)
+        run: |
+          docker pull "${IMAGE_SHA}"
+          docker tag  "${IMAGE_SHA}" "${IMAGE_TAG}"
+          docker push "${IMAGE_TAG}"
+
+  promote_prod:
+    name: Promote to prod (release)
+    if: "!contains(github.ref_name, '-rc.') && !contains(github.ref_name, '-beta.')"
+    runs-on: ubuntu-latest
+    environment: prod
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: ACR login + set image vars
+        run: |
+          ACR_NAME="${ACR_LOGIN_SERVER%%.azurecr.io}"
+          az acr login --name "$ACR_NAME"
+          echo "ACR_NAME=$ACR_NAME" >> $GITHUB_ENV
+          echo "IMAGE_SHA=${ACR_LOGIN_SERVER}/${APP_NAME}:${GITHUB_SHA}" >> $GITHUB_ENV
+          echo "IMAGE_TAG=${ACR_LOGIN_SERVER}/${APP_NAME}:${GITHUB_REF_NAME}" >> $GITHUB_ENV
+        env:
+          ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER }}
+
+      - name: Ensure SHA image exists (fallback build on tag commit)
+        run: |
+          FOUND="$(az acr repository show-tags -n "${ACR_NAME}" --repository "${APP_NAME}" --query "[?@=='${GITHUB_SHA}'] | length(@)" -o tsv 2>/dev/null || echo 0)"
+          if [ "$FOUND" != "1" ]; then
+            echo "SHA image not found. Building & pushing SHA from this tag commit..."
+            docker build -t "${IMAGE_SHA}" ./app
+            docker push "${IMAGE_SHA}"
+          fi
+
+      - name: Promote (retag SHA -> release tag)
+        run: |
+          docker pull "${IMAGE_SHA}"
+          docker tag  "${IMAGE_SHA}" "${IMAGE_TAG}"
+          docker push "${IMAGE_TAG}"
