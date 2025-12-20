@@ -1,11 +1,9 @@
 name: CD - Deploy by Tag (dev/staging/prod)
 
 on:
-    push:
-        tags:
-            - "v*.*.*"
-            - "v*.*.*-rc.*"
-            - "v*.*.*-beta.*"
+    workflow_run:
+        workflows: ["CI - Build SHA & Promote Tags (Env OIDC)"]
+        types: [completed]
 
 permissions:
     contents: read
