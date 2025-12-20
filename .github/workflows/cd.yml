@@ -1,7 +1,8 @@
-name: CD - Deploy by Tag (dev/staging/prod)
+name: CD - Deploy after CI Promote
 
 on:
     workflow_run:
+        # Must match CI workflow name exactly
         workflows: ["CI - Build SHA & Promote Tags (Env OIDC)"]
         types: [completed]
 
@@ -15,7 +16,12 @@ env:
 jobs:
     deploy_dev:
         name: Deploy to dev (beta tags)
-        if: startsWith(github.ref_name, 'v') && contains(github.ref_name, '-beta.')
+        # Run only when CI succeeded AND the trigger was a tag like v1.0.0-beta.1
+        if: >
+            github.event.workflow_run.conclusion == 'success' &&
+            github.event.workflow_run.event == 'push' &&
+            startsWith(github.event.workflow_run.head_branch, 'v') &&
+            contains(github.event.workflow_run.head_branch, '-beta.')
         runs-on: ubuntu-latest
         environment: dev
 
@@ -29,36 +35,29 @@ jobs:
                   tenant-id: ${{ vars.AZURE_TENANT_ID }}
                   subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
-            - name: ACR login
-              run: |
-                  ACR_NAME="${ACR_LOGIN_SERVER%%.azurecr.io}"
-                  az acr login --name "$ACR_NAME"
-                  echo "IMAGE=${ACR_LOGIN_SERVER}/${APP_NAME}:${GITHUB_REF_NAME}" >> $GITHUB_ENV
-              env:
-                  ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER }}
-
             - name: Check AKS power state (skip if stopped)
+              id: aks_state
               run: |
-                  STATE="$(az aks show -g "${{ vars.AKS_RG }}" -n "${{ vars.AKS_NAME }}" --query powerState.code -o tsv || true)"
+                  STATE="$(az aks show -g "${{ vars.AKS_RG }}" -n "${{ vars.AKS_NAME }}" --query powerState.code -o tsv 2>/dev/null || echo Unknown)"
                   echo "AKS powerState: $STATE"
-                  if [ "$STATE" != "Running" ]; then
-                  echo "AKS is not Running. Skipping deploy."
-                  exit 0
+                  if [ "$STATE" = "Running" ]; then
+                    echo "deploy=true" >> $GITHUB_OUTPUT
+                  else
+                    echo "deploy=false" >> $GITHUB_OUTPUT
+                    echo "AKS is not Running. Skipping deploy steps."
                   fi
 
-            - name: Build & Push image (tag = git tag)
-              run: |
-                  docker build -t "$IMAGE" ./app
-                  docker push "$IMAGE"
-
             - name: Install kubectl
+              if: steps.aks_state.outputs.deploy == 'true'
               uses: azure/setup-kubectl@v4
 
             - name: Get AKS credentials
+              if: steps.aks_state.outputs.deploy == 'true'
               run: |
                   az aks get-credentials -g "${{ vars.AKS_RG }}" -n "${{ vars.AKS_NAME }}" --overwrite-existing
 
-            - name: Deploy (kustomize overlay dev)
+            - name: Update kustomize image tag
+              if: steps.aks_state.outputs.deploy == 'true'
               run: |
                   OVERLAY="k8s/overlays/dev"
                   python - << 'PY'
@@ -70,17 +69,25 @@ jobs:
                   with open(path,"w",encoding="utf-8") as f: f.write(s)
                   print("Updated", path, "to", tag)
                   PY
+              env:
+                  TAG: ${{ github.event.workflow_run.head_branch }}
+                  KUSTOM_FILE: k8s/overlays/dev/kustomization.yaml
 
+            - name: Deploy
+              if: steps.aks_state.outputs.deploy == 'true'
+              run: |
+                  OVERLAY="k8s/overlays/dev"
                   kubectl diff -k "$OVERLAY" || true
                   kubectl apply -k "$OVERLAY"
                   kubectl rollout status deploy/${APP_NAME} -n default --timeout=300s
-              env:
-                  TAG: ${{ github.ref_name }}
-                  KUSTOM_FILE: k8s/overlays/dev/kustomization.yaml
 
     deploy_staging:
         name: Deploy to staging (rc tags)
-        if: startsWith(github.ref_name, 'v') && contains(github.ref_name, '-rc.')
+        if: >
+            github.event.workflow_run.conclusion == 'success' &&
+            github.event.workflow_run.event == 'push' &&
+            startsWith(github.event.workflow_run.head_branch, 'v') &&
+            contains(github.event.workflow_run.head_branch, '-rc.')
         runs-on: ubuntu-latest
         environment: staging
 
@@ -94,36 +101,29 @@ jobs:
                   tenant-id: ${{ vars.AZURE_TENANT_ID }}
                   subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
-            - name: ACR login
-              run: |
-                  ACR_NAME="${ACR_LOGIN_SERVER%%.azurecr.io}"
-                  az acr login --name "$ACR_NAME"
-                  echo "IMAGE=${ACR_LOGIN_SERVER}/${APP_NAME}:${GITHUB_REF_NAME}" >> $GITHUB_ENV
-              env:
-                  ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER }}
-
             - name: Check AKS power state (skip if stopped)
+              id: aks_state
               run: |
-                  STATE="$(az aks show -g "${{ vars.AKS_RG }}" -n "${{ vars.AKS_NAME }}" --query powerState.code -o tsv || true)"
+                  STATE="$(az aks show -g "${{ vars.AKS_RG }}" -n "${{ vars.AKS_NAME }}" --query powerState.code -o tsv 2>/dev/null || echo Unknown)"
                   echo "AKS powerState: $STATE"
-                  if [ "$STATE" != "Running" ]; then
-                  echo "AKS is not Running. Skipping deploy."
-                  exit 0
+                  if [ "$STATE" = "Running" ]; then
+                    echo "deploy=true" >> $GITHUB_OUTPUT
+                  else
+                    echo "deploy=false" >> $GITHUB_OUTPUT
+                    echo "AKS is not Running. Skipping deploy steps."
                   fi
 
-            - name: Build & Push image (tag = git tag)
-              run: |
-                  docker build -t "$IMAGE" ./app
-                  docker push "$IMAGE"
-
             - name: Install kubectl
+              if: steps.aks_state.outputs.deploy == 'true'
               uses: azure/setup-kubectl@v4
 
             - name: Get AKS credentials
+              if: steps.aks_state.outputs.deploy == 'true'
               run: |
                   az aks get-credentials -g "${{ vars.AKS_RG }}" -n "${{ vars.AKS_NAME }}" --overwrite-existing
 
-            - name: Deploy (kustomize overlay staging)
+            - name: Update kustomize image tag
+              if: steps.aks_state.outputs.deploy == 'true'
               run: |
                   OVERLAY="k8s/overlays/staging"
                   python - << 'PY'
@@ -135,18 +135,26 @@ jobs:
                   with open(path,"w",encoding="utf-8") as f: f.write(s)
                   print("Updated", path, "to", tag)
                   PY
+              env:
+                  TAG: ${{ github.event.workflow_run.head_branch }}
+                  KUSTOM_FILE: k8s/overlays/staging/kustomization.yaml
 
+            - name: Deploy
+              if: steps.aks_state.outputs.deploy == 'true'
+              run: |
+                  OVERLAY="k8s/overlays/staging"
                   kubectl diff -k "$OVERLAY" || true
                   kubectl apply -k "$OVERLAY"
                   kubectl rollout status deploy/${APP_NAME} -n default --timeout=300s
-              env:
-                  TAG: ${{ github.ref_name }}
-                  KUSTOM_FILE: k8s/overlays/staging/kustomization.yaml
 
     deploy_prod:
         name: Deploy to prod (release tags)
-        # prod 只匹配纯 vX.Y.Z，不匹配 rc/beta
-        if: startsWith(github.ref_name, 'v') && !contains(github.ref_name, '-rc.') && !contains(github.ref_name, '-beta.')
+        if: >
+            github.event.workflow_run.conclusion == 'success' &&
+            github.event.workflow_run.event == 'push' &&
+            startsWith(github.event.workflow_run.head_branch, 'v') &&
+            !contains(github.event.workflow_run.head_branch, '-rc.') &&
+            !contains(github.event.workflow_run.head_branch, '-beta.')
         runs-on: ubuntu-latest
         environment: prod
 
@@ -160,58 +168,29 @@ jobs:
                   tenant-id: ${{ vars.AZURE_TENANT_ID }}
                   subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
-            - name: ACR login
-              run: |
-                  ACR_NAME="${ACR_LOGIN_SERVER%%.azurecr.io}"
-                  az acr login --name "$ACR_NAME"
-                  echo "IMAGE=${ACR_LOGIN_SERVER}/${APP_NAME}:${GITHUB_REF_NAME}" >> $GITHUB_ENV
-              env:
-                  ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER }}
-
-            - name: Wait until image tag exists in ACR
-              run: |
-                  ACR_NAME="${ACR_LOGIN_SERVER%%.azurecr.io}"
-                  TAG="${GITHUB_REF_NAME}"
-
-                  echo "Waiting for image tag ${TAG} in ${ACR_NAME}/demo-app ..."
-
-                  for i in {1..30}; do
-                    FOUND="$(az acr repository show-tags -n "$ACR_NAME" --repository "demo-app" --query "[?@=='${TAG}'] | length(@)" -o tsv 2>/dev/null || echo 0)"
-                    if [ "$FOUND" = "1" ]; then
-                        echo "Image tag found."
-                        exit 0
-                    fi
-                    echo "Not found yet, retry $i/30 ..."
-                    sleep 5
-                  done
-
-                  echo "Image tag not found after waiting."
-                  exit 1
-              env:
-                  ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER }}
-
             - name: Check AKS power state (skip if stopped)
+              id: aks_state
               run: |
-                  STATE="$(az aks show -g "${{ vars.AKS_RG }}" -n "${{ vars.AKS_NAME }}" --query powerState.code -o tsv || true)"
+                  STATE="$(az aks show -g "${{ vars.AKS_RG }}" -n "${{ vars.AKS_NAME }}" --query powerState.code -o tsv 2>/dev/null || echo Unknown)"
                   echo "AKS powerState: $STATE"
-                  if [ "$STATE" != "Running" ]; then
-                  echo "AKS is not Running. Skipping deploy."
-                  exit 0
+                  if [ "$STATE" = "Running" ]; then
+                    echo "deploy=true" >> $GITHUB_OUTPUT
+                  else
+                    echo "deploy=false" >> $GITHUB_OUTPUT
+                    echo "AKS is not Running. Skipping deploy steps."
                   fi
 
-            - name: Build & Push image (tag = git tag)
-              run: |
-                  docker build -t "$IMAGE" ./app
-                  docker push "$IMAGE"
-
             - name: Install kubectl
+              if: steps.aks_state.outputs.deploy == 'true'
               uses: azure/setup-kubectl@v4
 
             - name: Get AKS credentials
+              if: steps.aks_state.outputs.deploy == 'true'
               run: |
                   az aks get-credentials -g "${{ vars.AKS_RG }}" -n "${{ vars.AKS_NAME }}" --overwrite-existing
 
-            - name: Deploy (kustomize overlay prod)
+            - name: Update kustomize image tag
+              if: steps.aks_state.outputs.deploy == 'true'
               run: |
                   OVERLAY="k8s/overlays/prod"
                   python - << 'PY'
@@ -223,10 +202,14 @@ jobs:
                   with open(path,"w",encoding="utf-8") as f: f.write(s)
                   print("Updated", path, "to", tag)
                   PY
+              env:
+                  TAG: ${{ github.event.workflow_run.head_branch }}
+                  KUSTOM_FILE: k8s/overlays/prod/kustomization.yaml
 
+            - name: Deploy
+              if: steps.aks_state.outputs.deploy == 'true'
+              run: |
+                  OVERLAY="k8s/overlays/prod"
                   kubectl diff -k "$OVERLAY" || true
                   kubectl apply -k "$OVERLAY"
                   kubectl rollout status deploy/${APP_NAME} -n default --timeout=300s
-              env:
-                  TAG: ${{ github.ref_name }}
-                  KUSTOM_FILE: k8s/overlays/prod/kustomization.yaml
