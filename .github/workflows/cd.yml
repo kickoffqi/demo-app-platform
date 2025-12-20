@@ -104,6 +104,15 @@ jobs:
               env:
                   ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER }}
 
+            - name: Check AKS power state (skip if stopped)
+              run: |
+                  STATE="$(az aks show -g "${{ vars.AKS_RG }}" -n "${{ vars.AKS_NAME }}" --query powerState.code -o tsv || true)"
+                  echo "AKS powerState: $STATE"
+                  if [ "$STATE" != "Running" ]; then
+                  echo "AKS is not Running. Skipping deploy."
+                  exit 0
+                  fi
+
             - name: Build & Push image (tag = git tag)
               run: |
                   docker build -t "$IMAGE" ./app
@@ -160,6 +169,15 @@ jobs:
                   echo "IMAGE=${ACR_LOGIN_SERVER}/${APP_NAME}:${GITHUB_REF_NAME}" >> $GITHUB_ENV
               env:
                   ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER }}
+
+            - name: Check AKS power state (skip if stopped)
+              run: |
+                  STATE="$(az aks show -g "${{ vars.AKS_RG }}" -n "${{ vars.AKS_NAME }}" --query powerState.code -o tsv || true)"
+                  echo "AKS powerState: $STATE"
+                  if [ "$STATE" != "Running" ]; then
+                  echo "AKS is not Running. Skipping deploy."
+                  exit 0
+                  fi
 
             - name: Build & Push image (tag = git tag)
               run: |
