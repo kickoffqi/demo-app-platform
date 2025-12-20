@@ -172,22 +172,25 @@ jobs:
 
             - name: Wait until image tag exists in ACR
               run: |
-                  ACR_NAME="${ACR_LOGIN_SERVER%%.azurecr.io }"
+                  ACR_NAME="${ACR_LOGIN_SERVER%%.azurecr.io}"
                   TAG="${GITHUB_REF_NAME}"
-                  echo "Waiting for image tag ${TAG} in repo demo-app ..."
+
+                  echo "Waiting for image tag ${TAG} in ${ACR_NAME}/demo-app ..."
 
                   for i in {1..30}; do
-                  FOUND="$(az acr repository show-tags -n "$ACR_NAME" --repository demo-app --query "[?@=='${TAG}'] | length(@)" -o tsv || echo 0)"
-                  if [ "$FOUND" = "1" ]; then
-                      echo "Image tag found."
-                      exit 0
-                  fi
-                  echo "Not found yet, retry $i/30 ..."
-                  sleep 5
+                    FOUND="$(az acr repository show-tags -n "$ACR_NAME" --repository "demo-app" --query "[?@=='${TAG}'] | length(@)" -o tsv 2>/dev/null || echo 0)"
+                    if [ "$FOUND" = "1" ]; then
+                        echo "Image tag found."
+                        exit 0
+                    fi
+                    echo "Not found yet, retry $i/30 ..."
+                    sleep 5
                   done
 
                   echo "Image tag not found after waiting."
                   exit 1
+              env:
+                  ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER }}
 
             - name: Check AKS power state (skip if stopped)
               run: |
