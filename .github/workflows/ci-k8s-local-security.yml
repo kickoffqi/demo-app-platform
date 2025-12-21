@@ -1,0 +1,124 @@
+name: CI - Local K8s smoke + Security scans
+
+on:
+    pull_request:
+        branches: ["main"]
+    push:
+        branches: ["main"]
+
+permissions:
+    contents: read
+
+jobs:
+    ci:
+        runs-on: ubuntu-latest
+        timeout-minutes: 18
+
+        env:
+            APP_NAME: demo-app
+            NAMESPACE: default
+            PORT: "8080"
+            IMAGE_LOCAL: demo-app:local
+            KIND_CLUSTER: dev
+
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            # -------- Security: Dependency scan (pip-audit) --------
+            - name: Setup Python
+              uses: actions/setup-python@v5
+              with:
+                  python-version: "3.12"
+
+            - name: pip-audit (Python deps)
+              run: |
+                  set -e
+                  python -m pip install --upgrade pip
+                  pip install pip-audit
+                  # 如果你的 requirements 在 app/requirements.txt
+                  pip-audit -r app/requirements.txt -f json -o pip-audit.json || true
+                  echo "pip-audit finished (non-blocking)."
+
+            # -------- Build image (local) --------
+            - name: Build local image
+              run: |
+                  set -e
+                  docker build -t "${IMAGE_LOCAL}" -f app/Dockerfile app
+                  docker image ls | head
+
+            # -------- Security: Trivy filesystem scan (IaC/Secrets/Misconfig) --------
+            - name: Trivy filesystem scan (repo)
+              uses: aquasecurity/trivy-action@0.20.0
+              with:
+                  scan-type: "fs"
+                  scan-ref: "."
+                  format: "table"
+                  exit-code: "0"
+                  severity: "CRITICAL,HIGH"
+                  ignore-unfixed: "true"
+
+            # -------- Security: Trivy image scan (vulns) --------
+            - name: Trivy image scan
+              uses: aquasecurity/trivy-action@0.20.0
+              with:
+                  image-ref: "${{ env.IMAGE_LOCAL }}"
+                  format: "table"
+                  exit-code: "0" # 先不阻断；后面你想“挡 CRITICAL”再改成 1
+                  severity: "CRITICAL,HIGH"
+                  ignore-unfixed: "true"
+
+            # -------- K8s: kind cluster --------
+            - name: Install kubectl
+              uses: azure/setup-kubectl@v4
+
+            - name: Install kind
+              run: |
+                  set -e
+                  KIND_VERSION="v0.27.0"
+                  curl -Lo kind "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-amd64"
+                  chmod +x kind
+                  sudo mv kind /usr/local/bin/kind
+                  kind version
+
+            - name: Create kind cluster
+              run: |
+                  set -e
+                  kind create cluster --name "${KIND_CLUSTER}"
+                  kubectl cluster-info
+                  kubectl get nodes -o wide
+
+            - name: Load image into kind
+              run: |
+                  set -e
+                  kind load docker-image "${IMAGE_LOCAL}" --name "${KIND_CLUSTER}"
+
+            - name: Deploy (kustomize local overlay)
+              run: |
+                  set -e
+                  kubectl apply -k k8s/overlays/local
+                  kubectl rollout status deploy/${APP_NAME} -n ${NAMESPACE} --timeout=180s
+                  kubectl get pods -n ${NAMESPACE} -o wide
+
+            - name: Smoke test (scripts/smoke-test.sh)
+              run: |
+                  set -e
+                  APP_NAME=${APP_NAME} NAMESPACE=${NAMESPACE} PORT=${PORT} ./scripts/smoke-test.sh
+
+            - name: Debug dump on failure
+              if: failure()
+              run: |
+                  APP_NAME=${APP_NAME} NAMESPACE=${NAMESPACE} ./scripts/k8s-debug-dump.sh || true
+
+            - name: Upload reports (artifact)
+              if: always()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: ci-reports
+                  path: |
+                      pip-audit.json
+
+            - name: Cleanup
+              if: always()
+              run: |
+                  kind delete cluster --name "${KIND_CLUSTER}" || true
