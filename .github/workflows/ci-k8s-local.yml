@@ -1,0 +1,71 @@
+name: CI - K8s local smoke (kind)
+
+on:
+    pull_request:
+        branches: ["main"]
+    push:
+        branches: ["main"]
+
+permissions:
+    contents: read
+
+jobs:
+    kind-smoke:
+        runs-on: ubuntu-latest
+        timeout-minutes: 15
+
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Set up kubectl
+              uses: azure/setup-kubectl@v4
+
+            - name: Install kind
+              run: |
+                  set -e
+                  KIND_VERSION="v0.27.0"
+                  curl -Lo kind "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-amd64"
+                  chmod +x kind
+                  sudo mv kind /usr/local/bin/kind
+                  kind version
+
+            - name: Create kind cluster
+              run: |
+                  set -e
+                  kind create cluster --name dev
+                  kubectl cluster-info
+                  kubectl get nodes -o wide
+
+            - name: Build local image
+              run: |
+                  set -e
+                  docker build -t demo-app:local -f app/Dockerfile app
+                  docker image ls | head
+
+            - name: Load image into kind
+              run: |
+                  set -e
+                  kind load docker-image demo-app:local --name dev
+
+            - name: Deploy (kustomize local overlay)
+              run: |
+                  set -e
+                  kubectl apply -k k8s/overlays/local
+                  kubectl rollout status deploy/demo-app -n default --timeout=180s
+                  kubectl get pods -n default -o wide
+
+            - name: Smoke test (port-forward)
+              run: |
+                  set -e
+                  APP_NAME=demo-app NAMESPACE=default PORT=8080 ./scripts/smoke-test.sh
+
+            - name: Debug dump on failure
+              if: failure()
+              run: |
+                  APP_NAME=demo-app NAMESPACE=default ./scripts/k8s-debug-dump.sh || true
+
+            - name: Cleanup
+              if: always()
+              run: |
+                  kind delete cluster --name dev || true

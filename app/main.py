@@ -5,7 +5,7 @@ app = Flask(__name__)
 
 @app.get("/health")
 def healthz():
-    return {"service": "demo-app", "ts": time.time(), "ver": "beta-test-1"}
+    return {"service": "demo-app", "ts": time.time(), "ver": "beta-test-2"}
 
 @app.get("/")
 def index():
