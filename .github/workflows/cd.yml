@@ -243,11 +243,11 @@ jobs:
 
           echo "Service IP: $SVC_IP"
 
-          for i in {1..10}; do
+          for i in {1..2}; do
             CODE=$(kubectl run curltest \
               --rm -i --restart=Never \
               --image=curlimages/curl:8.5.0 \
-              -- curl -s -o /dev/null -w "%{http_code}" http://${SVC_IP}:8080/health || true)
+              -- curl -s -o /dev/null -w "%{http_code}" http://${SVC_IP}:8080/healthz || true)
 
             if [ "$CODE" = "200" ]; then
               echo "Smoke test OK"
