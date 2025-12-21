@@ -241,13 +241,16 @@ jobs:
           SVC_IP=$(kubectl get svc ${APP_NAME} -n default \
             -o jsonpath='{.spec.clusterIP}')
 
+          EXT_IP=$(kubectl get svc demo-app -n default \
+          -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+
           echo "Service IP: $SVC_IP"
 
           for i in {1..2}; do
             CODE=$(kubectl run curltest \
               --rm -i --restart=Never \
               --image=curlimages/curl:8.5.0 \
-              -- curl -s -o /dev/null -w "%{http_code}" http://${SVC_IP}:8080/healthz || true)
+              -- curl -s -o /dev/null -w "%{http_code}" http://${SVC_IP}:8080/health || true)
 
             if [ "$CODE" = "200" ]; then
               echo "Smoke test OK"
