@@ -250,7 +250,8 @@ jobs:
             CODE=$(kubectl run curltest \
               --rm -i --restart=Never \
               --image=curlimages/curl:8.5.0 \
-              -- curl -s -o /dev/null -w "%{http_code}" http://${SVC_IP}:8080/health || true)
+              -- curl -s -o /dev/null -w "%{http_code}" http://${SVC_IP}/health || true)
+            echo "HTTP code from inside cluster: $CODE"
 
             if [ "$CODE" = "200" ]; then
               echo "Smoke test OK"
