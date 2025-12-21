@@ -1,214 +1,276 @@
 name: CD - Deploy after CI Promote
 
 on:
-    workflow_run:
-        workflows: ["Promote - Retag SHA to SemVer"]
-        types: [completed]
+  workflow_run:
+    workflows: ["Promote - Retag SHA to SemVer"]
+    types: [completed]
 
 permissions:
-    contents: read
-    id-token: write
+  contents: read
+  id-token: write
 
 env:
-    APP_NAME: demo-app
+  APP_NAME: demo-app
 
 jobs:
-    deploy_dev:
-        name: Deploy to dev (beta tags)
-        # Run only when CI succeeded AND the trigger was a tag like v1.0.0-beta.1
-        if: >
-            github.event.workflow_run.conclusion == 'success' &&
-            github.event.workflow_run.event == 'push' &&
-            startsWith(github.event.workflow_run.head_branch, 'v') &&
-            contains(github.event.workflow_run.head_branch, '-beta.')
-        runs-on: ubuntu-latest
-        environment: dev
+  deploy_dev:
+    name: Deploy to dev (beta tags)
+    # Run only when CI succeeded AND the trigger was a tag like v1.0.0-beta.1
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      startsWith(github.event.workflow_run.head_branch, 'v') &&
+      contains(github.event.workflow_run.head_branch, '-beta.')
+    runs-on: ubuntu-latest
+    environment: dev
 
-        steps:
-            - uses: actions/checkout@v4
+    steps:
+      - uses: actions/checkout@v4
 
-            - name: Azure login (OIDC)
-              uses: azure/login@v2
-              with:
-                  client-id: ${{ vars.AZURE_CLIENT_ID }}
-                  tenant-id: ${{ vars.AZURE_TENANT_ID }}
-                  subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
-            - name: Check AKS power state (skip if stopped)
-              id: aks_state
-              run: |
-                  STATE="$(az aks show -g "${{ vars.AKS_RG }}" -n "${{ vars.AKS_NAME }}" --query powerState.code -o tsv 2>/dev/null || echo Unknown)"
-                  echo "AKS powerState: $STATE"
-                  if [ "$STATE" = "Running" ]; then
-                    echo "deploy=true" >> $GITHUB_OUTPUT
-                  else
-                    echo "deploy=false" >> $GITHUB_OUTPUT
-                    echo "AKS is not Running. Skipping deploy steps."
-                  fi
+      - name: Check AKS power state (skip if stopped)
+        id: aks_state
+        run: |
+          STATE="$(az aks show -g "${{ vars.AKS_RG }}" -n "${{ vars.AKS_NAME }}" --query powerState.code -o tsv 2>/dev/null || echo Unknown)"
+          echo "AKS powerState: $STATE"
+          if [ "$STATE" = "Running" ]; then
+            echo "deploy=true" >> $GITHUB_OUTPUT
+          else
+            echo "deploy=false" >> $GITHUB_OUTPUT
+            echo "AKS is not Running. Skipping deploy steps."
+          fi
 
-            - name: Install kubectl
-              if: steps.aks_state.outputs.deploy == 'true'
-              uses: azure/setup-kubectl@v4
+      - name: Install kubectl
+        if: steps.aks_state.outputs.deploy == 'true'
+        uses: azure/setup-kubectl@v4
 
-            - name: Get AKS credentials
-              if: steps.aks_state.outputs.deploy == 'true'
-              run: |
-                  az aks get-credentials -g "${{ vars.AKS_RG }}" -n "${{ vars.AKS_NAME }}" --overwrite-existing
+      - name: Get AKS credentials
+        if: steps.aks_state.outputs.deploy == 'true'
+        run: |
+          az aks get-credentials -g "${{ vars.AKS_RG }}" -n "${{ vars.AKS_NAME }}" --overwrite-existing
 
-            - name: Update kustomize image tag
-              if: steps.aks_state.outputs.deploy == 'true'
-              run: |
-                  OVERLAY="k8s/overlays/dev"
-                  python - << 'PY'
-                  import os, re
-                  path=os.environ["KUSTOM_FILE"]
-                  tag=os.environ["TAG"]
-                  with open(path,"r",encoding="utf-8") as f: s=f.read()
-                  s=re.sub(r'(?m)^\s*newTag:\s*.*$', f'    newTag: {tag}', s)
-                  with open(path,"w",encoding="utf-8") as f: f.write(s)
-                  print("Updated", path, "to", tag)
-                  PY
-              env:
-                  TAG: ${{ github.event.workflow_run.head_branch }}
-                  KUSTOM_FILE: k8s/overlays/dev/kustomization.yaml
+      - name: Update kustomize image tag
+        if: steps.aks_state.outputs.deploy == 'true'
+        run: |
+          OVERLAY="k8s/overlays/dev"
+          python - << 'PY'
+          import os, re
+          path=os.environ["KUSTOM_FILE"]
+          tag=os.environ["TAG"]
+          with open(path,"r",encoding="utf-8") as f: s=f.read()
+          s=re.sub(r'(?m)^\s*newTag:\s*.*$', f'    newTag: {tag}', s)
+          with open(path,"w",encoding="utf-8") as f: f.write(s)
+          print("Updated", path, "to", tag)
+          PY
+        env:
+          TAG: ${{ github.event.workflow_run.head_branch }}
+          KUSTOM_FILE: k8s/overlays/dev/kustomization.yaml
 
-            - name: Deploy
-              if: steps.aks_state.outputs.deploy == 'true'
-              run: |
-                  OVERLAY="k8s/overlays/dev"
-                  kubectl diff -k "$OVERLAY" || true
-                  kubectl apply -k "$OVERLAY"
-                  kubectl rollout status deploy/${APP_NAME} -n default --timeout=300s
+      - name: Deploy
+        if: steps.aks_state.outputs.deploy == 'true'
+        run: |
+          OVERLAY="k8s/overlays/dev"
+          kubectl diff -k "$OVERLAY" || true
+          kubectl apply -k "$OVERLAY"
+          kubectl rollout status deploy/${APP_NAME} -n default --timeout=300s
 
-    deploy_staging:
-        name: Deploy to staging (rc tags)
-        if: >
-            github.event.workflow_run.conclusion == 'success' &&
-            github.event.workflow_run.event == 'push' &&
-            startsWith(github.event.workflow_run.head_branch, 'v') &&
-            contains(github.event.workflow_run.head_branch, '-rc.')
-        runs-on: ubuntu-latest
-        environment: staging
+  deploy_staging:
+    name: Deploy to staging (rc tags)
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      startsWith(github.event.workflow_run.head_branch, 'v') &&
+      contains(github.event.workflow_run.head_branch, '-rc.')
+    runs-on: ubuntu-latest
+    environment: staging
 
-        steps:
-            - uses: actions/checkout@v4
+    steps:
+      - uses: actions/checkout@v4
 
-            - name: Azure login (OIDC)
-              uses: azure/login@v2
-              with:
-                  client-id: ${{ vars.AZURE_CLIENT_ID }}
-                  tenant-id: ${{ vars.AZURE_TENANT_ID }}
-                  subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
-            - name: Check AKS power state (skip if stopped)
-              id: aks_state
-              run: |
-                  STATE="$(az aks show -g "${{ vars.AKS_RG }}" -n "${{ vars.AKS_NAME }}" --query powerState.code -o tsv 2>/dev/null || echo Unknown)"
-                  echo "AKS powerState: $STATE"
-                  if [ "$STATE" = "Running" ]; then
-                    echo "deploy=true" >> $GITHUB_OUTPUT
-                  else
-                    echo "deploy=false" >> $GITHUB_OUTPUT
-                    echo "AKS is not Running. Skipping deploy steps."
-                  fi
+      - name: Check AKS power state (skip if stopped)
+        id: aks_state
+        run: |
+          STATE="$(az aks show -g "${{ vars.AKS_RG }}" -n "${{ vars.AKS_NAME }}" --query powerState.code -o tsv 2>/dev/null || echo Unknown)"
+          echo "AKS powerState: $STATE"
+          if [ "$STATE" = "Running" ]; then
+            echo "deploy=true" >> $GITHUB_OUTPUT
+          else
+            echo "deploy=false" >> $GITHUB_OUTPUT
+            echo "AKS is not Running. Skipping deploy steps."
+          fi
 
-            - name: Install kubectl
-              if: steps.aks_state.outputs.deploy == 'true'
-              uses: azure/setup-kubectl@v4
+      - name: Install kubectl
+        if: steps.aks_state.outputs.deploy == 'true'
+        uses: azure/setup-kubectl@v4
 
-            - name: Get AKS credentials
-              if: steps.aks_state.outputs.deploy == 'true'
-              run: |
-                  az aks get-credentials -g "${{ vars.AKS_RG }}" -n "${{ vars.AKS_NAME }}" --overwrite-existing
+      - name: Get AKS credentials
+        if: steps.aks_state.outputs.deploy == 'true'
+        run: |
+          az aks get-credentials -g "${{ vars.AKS_RG }}" -n "${{ vars.AKS_NAME }}" --overwrite-existing
 
-            - name: Update kustomize image tag
-              if: steps.aks_state.outputs.deploy == 'true'
-              run: |
-                  OVERLAY="k8s/overlays/staging"
-                  python - << 'PY'
-                  import os, re
-                  path=os.environ["KUSTOM_FILE"]
-                  tag=os.environ["TAG"]
-                  with open(path,"r",encoding="utf-8") as f: s=f.read()
-                  s=re.sub(r'(?m)^\s*newTag:\s*.*$', f'    newTag: {tag}', s)
-                  with open(path,"w",encoding="utf-8") as f: f.write(s)
-                  print("Updated", path, "to", tag)
-                  PY
-              env:
-                  TAG: ${{ github.event.workflow_run.head_branch }}
-                  KUSTOM_FILE: k8s/overlays/staging/kustomization.yaml
+      - name: Update kustomize image tag
+        if: steps.aks_state.outputs.deploy == 'true'
+        run: |
+          OVERLAY="k8s/overlays/staging"
+          python - << 'PY'
+          import os, re
+          path=os.environ["KUSTOM_FILE"]
+          tag=os.environ["TAG"]
+          with open(path,"r",encoding="utf-8") as f: s=f.read()
+          s=re.sub(r'(?m)^\s*newTag:\s*.*$', f'    newTag: {tag}', s)
+          with open(path,"w",encoding="utf-8") as f: f.write(s)
+          print("Updated", path, "to", tag)
+          PY
+        env:
+          TAG: ${{ github.event.workflow_run.head_branch }}
+          KUSTOM_FILE: k8s/overlays/staging/kustomization.yaml
 
-            - name: Deploy
-              if: steps.aks_state.outputs.deploy == 'true'
-              run: |
-                  OVERLAY="k8s/overlays/staging"
-                  kubectl diff -k "$OVERLAY" || true
-                  kubectl apply -k "$OVERLAY"
-                  kubectl rollout status deploy/${APP_NAME} -n default --timeout=300s
+      - name: Deploy
+        if: steps.aks_state.outputs.deploy == 'true'
+        run: |
+          OVERLAY="k8s/overlays/staging"
+          kubectl diff -k "$OVERLAY" || true
+          kubectl apply -k "$OVERLAY"
+          kubectl rollout status deploy/${APP_NAME} -n default --timeout=300s
 
-    deploy_prod:
-        name: Deploy to prod (release tags)
-        if: >
-            github.event.workflow_run.conclusion == 'success' &&
-            github.event.workflow_run.event == 'push' &&
-            startsWith(github.event.workflow_run.head_branch, 'v') &&
-            !contains(github.event.workflow_run.head_branch, '-rc.') &&
-            !contains(github.event.workflow_run.head_branch, '-beta.')
-        runs-on: ubuntu-latest
-        environment: prod
+  deploy_prod:
+    name: Deploy to prod (release tags)
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      startsWith(github.event.workflow_run.head_branch, 'v') &&
+      !contains(github.event.workflow_run.head_branch, '-rc.') &&
+      !contains(github.event.workflow_run.head_branch, '-beta.')
+    runs-on: ubuntu-latest
+    environment: prod
 
-        steps:
-            - uses: actions/checkout@v4
+    steps:
+      - uses: actions/checkout@v4
 
-            - name: Azure login (OIDC)
-              uses: azure/login@v2
-              with:
-                  client-id: ${{ vars.AZURE_CLIENT_ID }}
-                  tenant-id: ${{ vars.AZURE_TENANT_ID }}
-                  subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
-            - name: Check AKS power state (skip if stopped)
-              id: aks_state
-              run: |
-                  STATE="$(az aks show -g "${{ vars.AKS_RG }}" -n "${{ vars.AKS_NAME }}" --query powerState.code -o tsv 2>/dev/null || echo Unknown)"
-                  echo "AKS powerState: $STATE"
-                  if [ "$STATE" = "Running" ]; then
-                    echo "deploy=true" >> $GITHUB_OUTPUT
-                  else
-                    echo "deploy=false" >> $GITHUB_OUTPUT
-                    echo "AKS is not Running. Skipping deploy steps."
-                  fi
+      - name: Check AKS power state (skip if stopped)
+        id: aks_state
+        run: |
+          STATE="$(az aks show -g "${{ vars.AKS_RG }}" -n "${{ vars.AKS_NAME }}" --query powerState.code -o tsv 2>/dev/null || echo Unknown)"
+          echo "AKS powerState: $STATE"
+          if [ "$STATE" = "Running" ]; then
+            echo "deploy=true" >> $GITHUB_OUTPUT
+          else
+            echo "deploy=false" >> $GITHUB_OUTPUT
+            echo "AKS is not Running. Skipping deploy steps."
+          fi
 
-            - name: Install kubectl
-              if: steps.aks_state.outputs.deploy == 'true'
-              uses: azure/setup-kubectl@v4
+      - name: Install kubectl
+        if: steps.aks_state.outputs.deploy == 'true'
+        uses: azure/setup-kubectl@v4
 
-            - name: Get AKS credentials
-              if: steps.aks_state.outputs.deploy == 'true'
-              run: |
-                  az aks get-credentials -g "${{ vars.AKS_RG }}" -n "${{ vars.AKS_NAME }}" --overwrite-existing
+      - name: Get AKS credentials
+        if: steps.aks_state.outputs.deploy == 'true'
+        run: |
+          az aks get-credentials -g "${{ vars.AKS_RG }}" -n "${{ vars.AKS_NAME }}" --overwrite-existing
 
-            - name: Update kustomize image tag
-              if: steps.aks_state.outputs.deploy == 'true'
-              run: |
-                  OVERLAY="k8s/overlays/prod"
-                  python - << 'PY'
-                  import os, re
-                  path=os.environ["KUSTOM_FILE"]
-                  tag=os.environ["TAG"]
-                  with open(path,"r",encoding="utf-8") as f: s=f.read()
-                  s=re.sub(r'(?m)^\s*newTag:\s*.*$', f'    newTag: {tag}', s)
-                  with open(path,"w",encoding="utf-8") as f: f.write(s)
-                  print("Updated", path, "to", tag)
-                  PY
-              env:
-                  TAG: ${{ github.event.workflow_run.head_branch }}
-                  KUSTOM_FILE: k8s/overlays/prod/kustomization.yaml
+      - name: Update kustomize image tag
+        if: steps.aks_state.outputs.deploy == 'true'
+        run: |
+          OVERLAY="k8s/overlays/prod"
+          python - << 'PY'
+          import os, re
+          path=os.environ["KUSTOM_FILE"]
+          tag=os.environ["TAG"]
+          with open(path,"r",encoding="utf-8") as f: s=f.read()
+          s=re.sub(r'(?m)^\s*newTag:\s*.*$', f'    newTag: {tag}', s)
+          with open(path,"w",encoding="utf-8") as f: f.write(s)
+          print("Updated", path, "to", tag)
+          PY
+        env:
+          TAG: ${{ github.event.workflow_run.head_branch }}
+          KUSTOM_FILE: k8s/overlays/prod/kustomization.yaml
 
-            - name: Deploy
-              if: steps.aks_state.outputs.deploy == 'true'
-              run: |
-                  OVERLAY="k8s/overlays/prod"
-                  kubectl diff -k "$OVERLAY" || true
-                  kubectl apply -k "$OVERLAY"
-                  kubectl rollout status deploy/${APP_NAME} -n default --timeout=300s
+      - name: Deploy
+        if: steps.aks_state.outputs.deploy == 'true'
+        run: |
+          OVERLAY="k8s/overlays/prod"
+          kubectl diff -k "$OVERLAY" || true
+          kubectl apply -k "$OVERLAY"
+          kubectl rollout status deploy/${APP_NAME} -n default --timeout=300s
+
+      - name: Post-deploy health check (K8s)
+        run: |
+          set -e
+
+          echo "Waiting for endpoints..."
+          for i in {1..12}; do
+            EP=$(kubectl get endpoints ${APP_NAME} -n default \
+              -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null || true)
+
+            if [ -n "$EP" ]; then
+              echo "Endpoints ready: $EP"
+              exit 0
+            fi
+
+            echo "No endpoints yet, retry $i/12"
+            sleep 10
+          done
+
+          echo "❌ Service has no endpoints"
+          exit 1
+
+      - name: Post-deploy smoke test
+        run: |
+          set -e
+
+          SVC_IP=$(kubectl get svc ${APP_NAME} -n default \
+            -o jsonpath='{.spec.clusterIP}')
+
+          echo "Service IP: $SVC_IP"
+
+          for i in {1..10}; do
+            CODE=$(kubectl run curltest \
+              --rm -i --restart=Never \
+              --image=curlimages/curl:8.5.0 \
+              -- curl -s -o /dev/null -w "%{http_code}" http://${SVC_IP}:8080/health || true)
+
+            if [ "$CODE" = "200" ]; then
+              echo "Smoke test OK"
+              exit 0
+            fi
+
+            echo "HTTP $CODE, retry $i/10"
+            sleep 5
+          done
+
+          echo "❌ Smoke test failed"
+          exit 1
+
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          echo "Rolling back deployment..."
+          kubectl rollout undo deploy/${APP_NAME} -n default
+          kubectl rollout status deploy/${APP_NAME} -n default --timeout=300s
+
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@0.20.0
+        with:
+          image-ref: ${{ env.IMAGE }}
+          severity: CRITICAL,HIGH
+          exit-code: 0 # ❗不阻断
