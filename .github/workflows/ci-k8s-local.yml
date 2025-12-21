@@ -48,17 +48,11 @@ jobs:
                   set -e
                   kind load docker-image demo-app:local --name dev
 
-            - name: Deploy (kustomize local overlay)
+            - name: Deploy + smoke via Makefile
               run: |
                   set -e
-                  kubectl apply -k k8s/overlays/local
-                  kubectl rollout status deploy/demo-app -n default --timeout=180s
-                  kubectl get pods -n default -o wide
-
-            - name: Smoke test (port-forward)
-              run: |
-                  set -e
-                  APP_NAME=demo-app NAMESPACE=default PORT=8080 ./scripts/smoke-test.sh
+                  make local-deploy
+                  make local-test
 
             - name: Debug dump on failure
               if: failure()
