@@ -72,16 +72,24 @@ jobs:
                   docker image ls | head
 
             # -------- Security: Trivy filesystem scan (IaC/Secrets/Misconfig) --------
-            - name: Trivy filesystem scan (repo) - block on CRITICAL
-              uses: aquasecurity/trivy-action@0.20.0
+            - name: Trivy repo scan (secrets + misconfig)
+              uses: aquasecurity/trivy-action@0.28.0
               with:
-                  scan-type: "fs"
-                  scan-ref: "."
-                  format: "table"
-                  exit-code: "1" # ✅ 有发现就 fail
-                  scanners: "secret,misconfig" # ✅ 只允许这些值：vuln/misconfig/secret/license
-                  severity: "HIGH,CRITICAL" # ✅ 不用 UNKNOWN.. 那种写法
-                  ignore-unfixed: "true"
+                  scan-type: fs
+                  scan-ref: .
+                  scanners: secret,misconfig
+                  severity: HIGH,CRITICAL
+                  exit-code: 1
+                  ignore-unfixed: true
+                  format: table
+                  output: ci-reports/trivy-fs.txt
+
+            - name: Upload CI reports
+              if: always()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: ci-reports
+                  path: ci-reports/
 
             - name: Summary (Trivy repo scan)
               if: always()
