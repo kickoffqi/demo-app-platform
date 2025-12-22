@@ -8,7 +8,8 @@ COPY main.py .
 EXPOSE 8080
 
 # ✅ create non-root user
-RUN useradd -m -u 10001 appuser
+RUN useradd -m -u 10001 appuser \
+    && chown -R 10001:10001 /app
 USER 10001
 
 CMD ["python", "main.py"]

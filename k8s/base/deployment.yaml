@@ -2,9 +2,6 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: demo-app
-  namespace: default
-  labels:
-    app: demo-app
 spec:
   replicas: 2
   selector:
@@ -14,84 +11,26 @@ spec:
     metadata:
       labels:
         app: demo-app
-
     spec:
-      # -----------------------------
-      # Volumes
-      # -----------------------------
       volumes:
-        # 用于只读 root fs 场景下的临时写入
         - name: tmp
           emptyDir: {}
 
       containers:
         - name: demo
           image: acraksplatformdev6cf43o.azurecr.io/demo-app:PLACEHOLDER
-          imagePullPolicy: IfNotPresent
-
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
           ports:
             - containerPort: 8080
-
-          # -----------------------------
-          # Resources（调度 & HPA 基础）
-          # -----------------------------
           resources:
             requests:
               cpu: 50m
               memory: 64Mi
             limits:
-              cpu: 500m
-              memory: 256Mi
-
-          # -----------------------------
-          # Security Context（Trivy HIGH）
-          # -----------------------------
-          securityContext:
-            runAsNonRoot: true
-            runAsUser: 10001
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            capabilities:
-              drop:
-                - ALL
-
-          # -----------------------------
-          # Volume Mounts
-          # -----------------------------
-          volumeMounts:
-            - name: tmp
-              mountPath: /tmp
-
-          # -----------------------------
-          # Health Checks
-          # -----------------------------
-          livenessProbe:
-            httpGet:
-              path: /healthz
-              port: 8080
-            initialDelaySeconds: 10
-            periodSeconds: 10
-
-          readinessProbe:
-            httpGet:
-              path: /healthz
-              port: 8080
-            initialDelaySeconds: 5
-            periodSeconds: 5
-
-      # -----------------------------
-      # Pod-level Security
-      # -----------------------------
-      securityContext:
-        fsGroup: 10001
-
-      # -----------------------------
-      # Scheduling / HA
-      # -----------------------------
-      topologySpreadConstraints:
-        - maxSkew: 1
-          topologyKey: kubernetes.io/hostname
-          whenUnsatisfiable: ScheduleAnyway
-          labelSelector:
-            matchLabels:
-              app: demo-app
+              cpu: 200m
+              memory: 128Mi
