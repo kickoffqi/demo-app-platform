@@ -226,8 +226,7 @@ jobs:
                       print(len(vulns))
                       except Exception:
                       print("unknown")
-                      PY
-                      )
+                      PY                      
                       echo "- Findings: **$COUNT** (see artifact: ci-reports/pip-audit.json)" >> "$GITHUB_STEP_SUMMARY"
                   else
                       echo "- No report file generated." >> "$GITHUB_STEP_SUMMARY"
