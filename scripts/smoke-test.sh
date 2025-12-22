@@ -6,7 +6,7 @@ NAMESPACE="${NAMESPACE:-default}"
 PORT="${PORT:-8080}"
 
 # candidate paths (first that returns 200 wins)
-PATHS=("/health" "/healthz" "/")
+PATHS=("/healthz" "/health" "/")
 
 echo "Starting port-forward for ${APP_NAME}..."
 kubectl -n "${NAMESPACE}" port-forward "deploy/${APP_NAME}" "${PORT}:${PORT}" >/tmp/pf-"${APP_NAME}".log 2>&1 &
