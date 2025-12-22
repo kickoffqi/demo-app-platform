@@ -80,31 +80,34 @@ jobs:
         run: mkdir -p ci-reports
 
       - name: Trivy repo scan (secrets + misconfig) - CLI
+        id: trivy_fs
+        continue-on-error: true
         env:
           TRIVY_SKIP_CHECK_UPDATE: "true"
         run: |
           set -euo pipefail
 
-          # 只扫你 repo 里真正相关的 misconfig 类型：K8s + Dockerfile (+ Terraform 如果你有)
-          # 关键点：避免触发 Trivy 内置的 cloud policies（你这里就是 cloud policy rego 报错）
-          set +e
-          trivy fs . \
-            --scanners secret,misconfig \
-            --misconfig-scanners kubernetes,dockerfile,terraform \
-            --skip-check-update \
-            --severity HIGH,CRITICAL \
-            --ignore-unfixed \
-            --exit-code 1 \
-            --format table \
-            | tee ci-reports/trivy-fs.txt
-          TRIVY_EXIT="${PIPESTATUS[0]}"
-          set -e
+                # 只扫你 repo 里真正相关的 misconfig 类型：K8s + Dockerfile (+ Terraform 如果你有)
+                # 关键点：避免触发 Trivy 内置的 cloud policies（你这里就是 cloud policy rego 报错）
+                set +e
+                trivy fs . \
+                  --scanners secret,misconfig \
+                  --misconfig-scanners kubernetes,dockerfile,terraform \
+                  --skip-check-update \
+                  --severity HIGH,CRITICAL \
+                  --ignore-unfixed \
+                  --exit-code 1 \
+                  --format table \
+                  | tee ci-reports/trivy-fs.txt
+                TRIVY_EXIT="${PIPESTATUS[0]}"
+                set -e
 
-          echo ""
-          echo "=== Trivy report (ci-reports/trivy-fs.txt) ==="
-          sed -n '1,200p' ci-reports/trivy-fs.txt || true
-          echo "=== End report preview ==="
-          exit "${TRIVY_EXIT}"
+                echo ""
+                echo "=== Trivy report (ci-reports/trivy-fs.txt) ==="
+                sed -n '1,200p' ci-reports/trivy-fs.txt || true
+                echo "=== End report preview ==="
+                echo "exit_code=${TRIVY_EXIT}" >> "${GITHUB_OUTPUT}"
+                exit 0
 
       - name: Summary (Trivy repo scan)
         if: always()
@@ -247,11 +250,26 @@ jobs:
             echo "- No report file generated." >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      - name: Summary (Failure guide)
-        if: failure()
-        run: |
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "## ❌ Failure guide" >> "$GITHUB_STEP_SUMMARY"
-          echo "1) Check **Trivy** step output (secrets/misconfig or CRITICAL CVE)." >> "$GITHUB_STEP_SUMMARY"
-          echo "2) Check **Deploy** and **Smoke test** steps." >> "$GITHUB_STEP_SUMMARY"
-          echo "3) See **Debug dump on failure** (pods/events/describe/logs)." >> "$GITHUB_STEP_SUMMARY"
+            - name: Summary (Failure guide)
+              if: failure()
+              run: |
+                  echo "" >> "$GITHUB_STEP_SUMMARY"
+                  echo "## ❌ Failure guide" >> "$GITHUB_STEP_SUMMARY"
+                  echo "1) Check **Trivy** step output (secrets/misconfig or CRITICAL CVE)." >> "$GITHUB_STEP_SUMMARY"
+                  echo "2) Check **Deploy** and **Smoke test** steps." >> "$GITHUB_STEP_SUMMARY"
+                  echo "3) See **Debug dump on failure** (pods/events/describe/logs)." >> "$GITHUB_STEP_SUMMARY"
+
+            - name: Gate (Trivy repo scan)
+              if: always()
+              run: |
+                  set -euo pipefail
+                  CODE="${{ steps.trivy_fs.outputs.exit_code }}"
+                  if [ -z "${CODE}" ]; then
+                    echo "Trivy exit code missing (unexpected)."
+                    exit 2
+                  fi
+                  if [ "${CODE}" != "0" ]; then
+                    echo "Trivy repo scan gate failed (exit code: ${CODE})."
+                    exit "${CODE}"
+                  fi
+                  echo "Trivy repo scan gate passed."
