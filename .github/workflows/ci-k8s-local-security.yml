@@ -78,9 +78,10 @@ jobs:
                   scan-type: "fs"
                   scan-ref: "."
                   format: "table"
-                  exit-code: "1" # ✅ 阻断
-                  scanners: "UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL" # ✅ 重点扫 secret + misconfig
-                  severity: "CRITICAL"
+                  exit-code: "1" # ✅ 有发现就 fail
+                  scanners: "secret,misconfig" # ✅ 只允许这些值：vuln/misconfig/secret/license
+                  severity: "HIGH,CRITICAL" # ✅ 不用 UNKNOWN.. 那种写法
+                  ignore-unfixed: "true"
 
             - name: Summary (Trivy repo scan)
               if: always()
