@@ -87,15 +87,24 @@ jobs:
 
           # 只扫你 repo 里真正相关的 misconfig 类型：K8s + Dockerfile (+ Terraform 如果你有)
           # 关键点：避免触发 Trivy 内置的 cloud policies（你这里就是 cloud policy rego 报错）
+          set +e
           trivy fs . \
-          --scanners secret,misconfig \
-          --misconfig-scanners kubernetes,dockerfile,terraform \
-          --skip-check-update \
-          --severity HIGH,CRITICAL \
-          --ignore-unfixed \
-          --exit-code 1 \
-          --format table \
-          --output ci-reports/trivy-fs.txt
+            --scanners secret,misconfig \
+            --misconfig-scanners kubernetes,dockerfile,terraform \
+            --skip-check-update \
+            --severity HIGH,CRITICAL \
+            --ignore-unfixed \
+            --exit-code 1 \
+            --format table \
+            | tee ci-reports/trivy-fs.txt
+          TRIVY_EXIT="${PIPESTATUS[0]}"
+          set -e
+
+          echo ""
+          echo "=== Trivy report (ci-reports/trivy-fs.txt) ==="
+          sed -n '1,200p' ci-reports/trivy-fs.txt || true
+          echo "=== End report preview ==="
+          exit "${TRIVY_EXIT}"
 
       - name: Summary (Trivy repo scan)
         if: always()
