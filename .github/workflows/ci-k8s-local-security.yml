@@ -71,7 +71,9 @@ jobs:
                   docker build -t "${IMAGE_LOCAL}" -f app/Dockerfile app
                   docker image ls | head
 
-            # -------- Security: Trivy filesystem scan (IaC/Secrets/Misconfig) --------
+            - name: Prepare report folder
+              run: mkdir -p ci-reports
+
             - name: Trivy repo scan (secrets + misconfig)
               uses: aquasecurity/trivy-action@0.28.0
               with:
@@ -83,6 +85,7 @@ jobs:
                   ignore-unfixed: true
                   format: table
                   output: ci-reports/trivy-fs.txt
+                  trivy-args: --misconfig-scanners kubernetes,dockerfile,terraform
 
             - name: Upload CI reports
               if: always()
