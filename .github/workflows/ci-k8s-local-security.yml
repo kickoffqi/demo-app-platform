@@ -215,21 +215,12 @@ jobs:
               run: |
                   echo "" >> "$GITHUB_STEP_SUMMARY"
                   echo "### ✅ Dependency scan (pip-audit)" >> "$GITHUB_STEP_SUMMARY"
+
                   if [ -f pip-audit.json ]; then
-                      COUNT=$(python - << 'PY'
-                      import json
-                      p="pip-audit.json"
-                      try:
-                      data=json.load(open(p,"r",encoding="utf-8"))
-                      # pip-audit json: vulnerabilities list
-                      vulns=data.get("vulnerabilities", [])
-                      print(len(vulns))
-                      except Exception:
-                      print("unknown")
-                      PY                      
-                      echo "- Findings: **$COUNT** (see artifact: ci-reports/pip-audit.json)" >> "$GITHUB_STEP_SUMMARY"
+                  COUNT="$(python -c 'import json; d=json.load(open("pip-audit.json","r",encoding="utf-8")); print(len(d.get("vulnerabilities", [])))' 2>/dev/null || echo unknown)"
+                  echo "- Findings: **${COUNT}** (see artifact: ci-reports/pip-audit.json)" >> "$GITHUB_STEP_SUMMARY"
                   else
-                      echo "- No report file generated." >> "$GITHUB_STEP_SUMMARY"
+                    echo "- No report file generated." >> "$GITHUB_STEP_SUMMARY"
                   fi
 
             - name: Summary (Failure guide)
