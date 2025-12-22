@@ -135,11 +135,49 @@ jobs:
                   kind load docker-image "${IMAGE_LOCAL}" --name "${KIND_CLUSTER}"
 
             - name: Deploy (kustomize local overlay)
+              id: deploy
               run: |
-                  set -e
+                  set -euo pipefail
                   kubectl apply -k k8s/overlays/local
+
+                  echo "=== rollout status ==="
                   kubectl rollout status deploy/${APP_NAME} -n ${NAMESPACE} --timeout=180s
+
+                  echo "=== pods ==="
                   kubectl get pods -n ${NAMESPACE} -o wide
+
+            - name: Debug dump on failure
+              if: failure()
+              run: |
+                  set +e
+                  echo "## ❌ Deploy failed - debug dump" >> "$GITHUB_STEP_SUMMARY"
+                  echo "" >> "$GITHUB_STEP_SUMMARY"
+                  echo "### Pods" >> "$GITHUB_STEP_SUMMARY"
+                  echo '```' >> "$GITHUB_STEP_SUMMARY"
+                  kubectl get pods -n ${NAMESPACE} -o wide >> "$GITHUB_STEP_SUMMARY"
+                  echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+                  echo "### Events (namespace)" >> "$GITHUB_STEP_SUMMARY"
+                  echo '```' >> "$GITHUB_STEP_SUMMARY"
+                  kubectl get events -n ${NAMESPACE} --sort-by=.lastTimestamp | tail -n 80 >> "$GITHUB_STEP_SUMMARY"
+                  echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+                  echo "### Describe deploy" >> "$GITHUB_STEP_SUMMARY"
+                  echo '```' >> "$GITHUB_STEP_SUMMARY"
+                  kubectl describe deploy/${APP_NAME} -n ${NAMESPACE} >> "$GITHUB_STEP_SUMMARY"
+                  echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+                  echo "### Describe pods (first 3)" >> "$GITHUB_STEP_SUMMARY"
+                  for p in $(kubectl get pods -n ${NAMESPACE} -l app=${APP_NAME} -o name | head -n 3); do
+                  echo "#### $p" >> "$GITHUB_STEP_SUMMARY"
+                  echo '```' >> "$GITHUB_STEP_SUMMARY"
+                  kubectl describe $p -n ${NAMESPACE} >> "$GITHUB_STEP_SUMMARY"
+                  echo '```' >> "$GITHUB_STEP_SUMMARY"
+                  echo "Logs (tail 120):" >> "$GITHUB_STEP_SUMMARY"
+                  echo '```' >> "$GITHUB_STEP_SUMMARY"
+                  kubectl logs -n ${NAMESPACE} $p --tail=120 >> "$GITHUB_STEP_SUMMARY"
+                  echo '```' >> "$GITHUB_STEP_SUMMARY"
+                  done
 
             - name: Smoke test (scripts/smoke-test.sh)
               run: |
