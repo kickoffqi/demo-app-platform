@@ -250,26 +250,26 @@ jobs:
             echo "- No report file generated." >> "$GITHUB_STEP_SUMMARY"
           fi
 
-            - name: Summary (Failure guide)
-              if: failure()
-              run: |
-                  echo "" >> "$GITHUB_STEP_SUMMARY"
-                  echo "## ❌ Failure guide" >> "$GITHUB_STEP_SUMMARY"
-                  echo "1) Check **Trivy** step output (secrets/misconfig or CRITICAL CVE)." >> "$GITHUB_STEP_SUMMARY"
-                  echo "2) Check **Deploy** and **Smoke test** steps." >> "$GITHUB_STEP_SUMMARY"
-                  echo "3) See **Debug dump on failure** (pods/events/describe/logs)." >> "$GITHUB_STEP_SUMMARY"
+      - name: Summary (Failure guide)
+        if: failure()
+        run: |
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "## ❌ Failure guide" >> "$GITHUB_STEP_SUMMARY"
+          echo "1) Check **Trivy** step output (secrets/misconfig or CRITICAL CVE)." >> "$GITHUB_STEP_SUMMARY"
+          echo "2) Check **Deploy** and **Smoke test** steps." >> "$GITHUB_STEP_SUMMARY"
+          echo "3) See **Debug dump on failure** (pods/events/describe/logs)." >> "$GITHUB_STEP_SUMMARY"
 
-            - name: Gate (Trivy repo scan)
-              if: always()
-              run: |
-                  set -euo pipefail
-                  CODE="${{ steps.trivy_fs.outputs.exit_code }}"
-                  if [ -z "${CODE}" ]; then
-                    echo "Trivy exit code missing (unexpected)."
-                    exit 2
-                  fi
-                  if [ "${CODE}" != "0" ]; then
-                    echo "Trivy repo scan gate failed (exit code: ${CODE})."
-                    exit "${CODE}"
-                  fi
-                  echo "Trivy repo scan gate passed."
+      - name: Gate (Trivy repo scan)
+        if: always()
+        run: |
+          set -euo pipefail
+          CODE="${{ steps.trivy_fs.outputs.exit_code }}"
+          if [ -z "${CODE}" ]; then
+            echo "Trivy exit code missing (unexpected)."
+            exit 2
+          fi
+          if [ "${CODE}" != "0" ]; then
+            echo "Trivy repo scan gate failed (exit code: ${CODE})."
+            exit "${CODE}"
+          fi
+          echo "Trivy repo scan gate passed."
