@@ -71,28 +71,28 @@ jobs:
                   docker build -t "${IMAGE_LOCAL}" -f app/Dockerfile app
                   docker image ls | head
 
+            - name: Setup Trivy
+              uses: aquasecurity/setup-trivy@v0.2.1
+              with:
+                  version: v0.56.1
+
             - name: Prepare report folder
               run: mkdir -p ci-reports
 
-            - name: Trivy repo scan (secrets + misconfig)
-              uses: aquasecurity/trivy-action@0.28.0
-              with:
-                  scan-type: fs
-                  scan-ref: .
-                  scanners: secret,misconfig
-                  severity: HIGH,CRITICAL
-                  exit-code: 1
-                  ignore-unfixed: true
-                  format: table
-                  output: ci-reports/trivy-fs.txt
-                  trivy-args: --misconfig-scanners kubernetes,dockerfile,terraform
+            - name: Trivy repo scan (secrets + misconfig) - CLI
+              run: |
+                  set -euo pipefail
 
-            - name: Upload CI reports
-              if: always()
-              uses: actions/upload-artifact@v4
-              with:
-                  name: ci-reports
-                  path: ci-reports/
+                  # 只扫你 repo 里真正相关的 misconfig 类型：K8s + Dockerfile (+ Terraform 如果你有)
+                  # 关键点：避免触发 Trivy 内置的 cloud policies（你这里就是 cloud policy rego 报错）
+                  trivy fs . \
+                  --scanners secret,misconfig \
+                  --misconfig-scanners kubernetes,dockerfile,terraform \
+                  --severity HIGH,CRITICAL \
+                  --ignore-unfixed \
+                  --exit-code 1 \
+                  --format table \
+                  --output ci-reports/trivy-fs.txt
 
             - name: Summary (Trivy repo scan)
               if: always()
@@ -214,6 +214,7 @@ jobs:
               with:
                   name: ci-reports
                   path: |
+                      ci-reports/
                       pip-audit.json
 
             - name: Cleanup
