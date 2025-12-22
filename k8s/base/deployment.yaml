@@ -20,8 +20,13 @@ spec:
         - name: demo
           image: acraksplatformdev6cf43o.azurecr.io/demo-app:PLACEHOLDER
           securityContext:
-            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 10001
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+
           volumeMounts:
             - name: tmp
               mountPath: /tmp
@@ -34,3 +39,28 @@ spec:
             limits:
               cpu: 200m
               memory: 128Mi
+
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            failureThreshold: 30
+            periodSeconds: 2
+
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            timeoutSeconds: 1
+            periodSeconds: 5
+            failureThreshold: 3
+
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 10
+            timeoutSeconds: 1
+            periodSeconds: 10
+            failureThreshold: 3
