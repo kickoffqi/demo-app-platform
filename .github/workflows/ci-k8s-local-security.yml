@@ -25,6 +25,30 @@ jobs:
             - name: Checkout
               uses: actions/checkout@v4
 
+            - name: Summary (header)
+              run: |
+                  {
+                      echo "# CI Report"
+                      echo ""
+                      echo "**Repo:** $GITHUB_REPOSITORY"
+                      echo "**Ref:** $GITHUB_REF"
+                      echo "**SHA:** \`$GITHUB_SHA\`"
+                      echo "**Actor:** $GITHUB_ACTOR"
+                      echo ""
+                      echo "## Build & Deploy Targets"
+                      echo "- **APP:** \`${APP_NAME}\`"
+                      echo "- **Namespace:** \`${NAMESPACE}\`"
+                      echo "- **Local Image:** \`${IMAGE_LOCAL}\`"
+                      echo "- **Overlay:** \`k8s/overlays/local\`"
+                      echo "- **Kind Cluster:** \`${KIND_CLUSTER}\`"
+                      echo ""
+                      echo "## Stage Results"
+                      echo "- ⏳ Dependency scan (pip-audit)"
+                      echo "- ⏳ Trivy repo scan (secrets/misconfig)"
+                      echo "- ⏳ Trivy image scan (CVE)"
+                      echo "- ⏳ kind deploy + smoke test"
+                  } >> "$GITHUB_STEP_SUMMARY"
+
             # -------- Security: Dependency scan (pip-audit) --------
             - name: Setup Python
               uses: actions/setup-python@v5
@@ -54,9 +78,17 @@ jobs:
                   scan-type: "fs"
                   scan-ref: "."
                   format: "table"
-                  exit-code: "1" # ✅ 阻断
-                  scanners: "UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL" # ✅ 重点扫 secret + misconfig
-                  severity: "CRITICAL"
+                  exit-code: "1" # ✅ 有发现就 fail
+                  scanners: "secret,misconfig" # ✅ 只允许这些值：vuln/misconfig/secret/license
+                  severity: "HIGH,CRITICAL" # ✅ 不用 UNKNOWN.. 那种写法
+                  ignore-unfixed: "true"
+
+            - name: Summary (Trivy repo scan)
+              if: always()
+              run: |
+                  echo "" >> "$GITHUB_STEP_SUMMARY"
+                  echo "### ✅ Trivy repo scan (secrets/misconfig)" >> "$GITHUB_STEP_SUMMARY"
+                  echo "- Result: see logs above (blocked on secrets/misconfig if found)" >> "$GITHUB_STEP_SUMMARY"
 
             # -------- Security: Trivy image scan (vulns) --------
             - name: Trivy image scan
@@ -67,6 +99,14 @@ jobs:
                   exit-code: "1" # 先不阻断；后面你想“挡 CRITICAL”再改成 1
                   severity: "CRITICAL"
                   ignore-unfixed: "true"
+
+            - name: Summary (Trivy image scan)
+              if: always()
+              run: |
+                  echo "" >> "$GITHUB_STEP_SUMMARY"
+                  echo "### ✅ Trivy image scan (CVE)" >> "$GITHUB_STEP_SUMMARY"
+                  echo "- Policy: **block on CRITICAL**" >> "$GITHUB_STEP_SUMMARY"
+                  echo "- Image: \`${IMAGE_LOCAL}\`" >> "$GITHUB_STEP_SUMMARY"
 
             # -------- K8s: kind cluster --------
             - name: Install kubectl
@@ -105,6 +145,14 @@ jobs:
                   set -e
                   APP_NAME=${APP_NAME} NAMESPACE=${NAMESPACE} PORT=${PORT} ./scripts/smoke-test.sh
 
+            - name: Summary (K8s smoke)
+              if: success()
+              run: |
+                  echo "" >> "$GITHUB_STEP_SUMMARY"
+                  echo "### ✅ kind deploy + smoke test" >> "$GITHUB_STEP_SUMMARY"
+                  echo "- Deployment: \`${APP_NAME}\` in \`${NAMESPACE}\`" >> "$GITHUB_STEP_SUMMARY"
+                  echo "- Smoke: passed" >> "$GITHUB_STEP_SUMMARY"
+
             - name: Debug dump on failure
               if: failure()
               run: |
@@ -122,3 +170,35 @@ jobs:
               if: always()
               run: |
                   kind delete cluster --name "${KIND_CLUSTER}" || true
+
+            - name: Summary (pip-audit)
+              if: always()
+              run: |
+                  echo "" >> "$GITHUB_STEP_SUMMARY"
+                  echo "### ✅ Dependency scan (pip-audit)" >> "$GITHUB_STEP_SUMMARY"
+                  if [ -f pip-audit.json ]; then
+                      COUNT=$(python - << 'PY'
+                      import json
+                      p="pip-audit.json"
+                      try:
+                      data=json.load(open(p,"r",encoding="utf-8"))
+                      # pip-audit json: vulnerabilities list
+                      vulns=data.get("vulnerabilities", [])
+                      print(len(vulns))
+                      except Exception:
+                      print("unknown")
+                      PY
+                      )
+                      echo "- Findings: **$COUNT** (see artifact: ci-reports/pip-audit.json)" >> "$GITHUB_STEP_SUMMARY"
+                  else
+                      echo "- No report file generated." >> "$GITHUB_STEP_SUMMARY"
+                  fi
+
+            - name: Summary (Failure guide)
+              if: failure()
+              run: |
+                  echo "" >> "$GITHUB_STEP_SUMMARY"
+                  echo "## ❌ Failure guide" >> "$GITHUB_STEP_SUMMARY"
+                  echo "1) Check **Trivy** step output (secrets/misconfig or CRITICAL CVE)." >> "$GITHUB_STEP_SUMMARY"
+                  echo "2) Check **Deploy** and **Smoke test** steps." >> "$GITHUB_STEP_SUMMARY"
+                  echo "3) See **Debug dump on failure** (pods/events/describe/logs)." >> "$GITHUB_STEP_SUMMARY"
