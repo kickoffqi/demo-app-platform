@@ -48,15 +48,15 @@ jobs:
                   docker image ls | head
 
             # -------- Security: Trivy filesystem scan (IaC/Secrets/Misconfig) --------
-            - name: Trivy filesystem scan (repo)
+            - name: Trivy filesystem scan (repo) - block on CRITICAL
               uses: aquasecurity/trivy-action@0.20.0
               with:
                   scan-type: "fs"
                   scan-ref: "."
                   format: "table"
-                  exit-code: "0"
-                  severity: "CRITICAL,HIGH"
-                  ignore-unfixed: "true"
+                  exit-code: "1" # ✅ 阻断
+                  scanners: "UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL" # ✅ 重点扫 secret + misconfig
+                  severity: "CRITICAL"
 
             # -------- Security: Trivy image scan (vulns) --------
             - name: Trivy image scan
