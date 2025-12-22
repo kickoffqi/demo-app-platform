@@ -3,7 +3,7 @@ import time
 
 app = Flask(__name__)
 
-@app.get("/healthz")
+@app.get("/health")
 def healthz():
     return {"service": "demo-app", "ts": time.time(), "ver": "beta-test-2"}
 
