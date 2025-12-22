@@ -87,8 +87,9 @@ jobs:
               if: always()
               run: |
                   echo "" >> "$GITHUB_STEP_SUMMARY"
-                  echo "### ✅ Trivy repo scan (secrets/misconfig)" >> "$GITHUB_STEP_SUMMARY"
-                  echo "- Result: see logs above (blocked on secrets/misconfig if found)" >> "$GITHUB_STEP_SUMMARY"
+                  echo "### Trivy repo scan (secret/misconfig)" >> "$GITHUB_STEP_SUMMARY"
+                  echo "- Gate: **block on HIGH/CRITICAL**" >> "$GITHUB_STEP_SUMMARY"
+                  echo "- If failed: fix Dockerfile USER + K8s securityContext/readOnlyRootFilesystem" >> "$GITHUB_STEP_SUMMARY"
 
             # -------- Security: Trivy image scan (vulns) --------
             - name: Trivy image scan

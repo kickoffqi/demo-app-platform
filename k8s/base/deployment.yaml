@@ -15,6 +15,12 @@ spec:
       containers:
         - name: demo
           image: acraksplatformdev6cf43o.azurecr.io/demo-app:PLACEHOLDER
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
           ports:
             - containerPort: 8080
           resources:
@@ -24,3 +30,6 @@ spec:
             limits:
               cpu: 200m
               memory: 128Mi
+  volumes:
+    - name: tmp
+      emptyDir: {}
