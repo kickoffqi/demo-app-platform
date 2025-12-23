@@ -234,36 +234,18 @@ jobs:
           echo "❌ Service has no endpoints"
           exit 1
 
-      - name: Post-deploy smoke test
+      - name: Smoke test (scripts/smoke-test.sh)
         run: |
           set -e
+          APP_NAME=${APP_NAME} NAMESPACE=${NAMESPACE} PORT=${PORT} ./scripts/smoke-test.sh
 
-          SVC_IP=$(kubectl get svc ${APP_NAME} -n default \
-            -o jsonpath='{.spec.clusterIP}')
-
-          EXT_IP=$(kubectl get svc demo-app -n default \
-          -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-
-          echo "Service IP: $SVC_IP"
-
-          for i in {1..2}; do
-            CODE=$(kubectl run curltest \
-              --rm -i --restart=Never \
-              --image=curlimages/curl:8.5.0 \
-              -- curl -s -o /dev/null -w "%{http_code}" http://${SVC_IP}/health || true)
-            echo "HTTP code from inside cluster: $CODE"
-
-            if [ "$CODE" = "200" ]; then
-              echo "Smoke test OK"
-              exit 0
-            fi
-
-            echo "HTTP $CODE, retry $i/10"
-            sleep 5
-          done
-
-          echo "❌ Smoke test failed"
-          exit 1
+      - name: Summary (K8s smoke)
+        if: success()
+        run: |
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### ✅ kind deploy + smoke test" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Deployment: \`${APP_NAME}\` in \`${NAMESPACE}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Smoke: passed" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Rollback on failure
         if: failure()
