@@ -1,6 +1,8 @@
 from flask import Flask
 import time
 
+import socket
+
 app = Flask(__name__)
 
 @app.get("/healthz")
@@ -13,7 +15,8 @@ def health():
 
 @app.get("/")
 def index():
-    return {"service": "demo-app", "ts": time.time()}, 200
+    #return {"service": "demo-app", "ts": time.time()}, 200
+    return {"service":"demo-app", "pod": socket.gethostname(), "ts": time.time()}
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
