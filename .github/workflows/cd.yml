@@ -253,13 +253,3 @@ jobs:
           echo "Rolling back deployment..."
           kubectl rollout undo deploy/${APP_NAME} -n default
           kubectl rollout status deploy/${APP_NAME} -n default --timeout=300s
-
-      # -------- Security: Trivy image scan (vulns) --------
-      - name: Trivy image scan
-        uses: aquasecurity/trivy-action@0.20.0
-        with:
-          image-ref: "${{ env.IMAGE_LOCAL }}"
-          format: "table"
-          exit-code: "0" # 先不阻断；后面你想“挡 CRITICAL”再改成 1
-          severity: "CRITICAL"
-          ignore-unfixed: "true"
