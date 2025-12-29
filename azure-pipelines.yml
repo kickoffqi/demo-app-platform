@@ -1,0 +1,105 @@
+trigger:
+  branches:
+    include:
+      - main
+
+pr:
+  branches:
+    include:
+      - main
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  - name: APP_NAME
+    value: demo-app
+  - name: NAMESPACE
+    value: default
+  - name: ACR_NAME
+    value: acraksplatformdev6cf43o
+  - name: ACR_LOGIN_SERVER
+    value: $(ACR_NAME).azurecr.io
+  - name: IMAGE_REPO
+    value: demo-app
+  - name: IMAGE_TAG
+    value: $(Build.SourceVersion)
+  - name: IMAGE
+    value: $(ACR_LOGIN_SERVER)/$(IMAGE_REPO):$(IMAGE_TAG)
+  - name: KUSTOM_FILE
+    value: k8s/overlays/local/kustomization.yaml
+  - name: OVERLAY
+    value: k8s/overlays/local
+
+stages:
+  - stage: BuildPush
+    displayName: Build & Push (ACR)
+    jobs:
+      - job: Build
+        displayName: Build image and push to ACR
+        steps:
+          - checkout: self
+
+          - task: AzureCLI@2
+            displayName: ACR login + build + push
+            inputs:
+              azureSubscription: $(AZURE_SERVICE_CONNECTION)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                set -euo pipefail
+                az acr login -n "$(ACR_NAME)"
+                docker build -t "$(IMAGE)" -f app/Dockerfile app
+                docker push "$(IMAGE)"
+
+  - stage: DeployDev
+    displayName: Deploy to AKS (dev)
+    dependsOn: BuildPush
+    jobs:
+      - deployment: Deploy
+        displayName: Apply kustomize overlay to AKS
+        environment: dev
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+
+                - task: AzureCLI@2
+                  displayName: AKS deploy (kubectl apply -k)
+                  inputs:
+                    azureSubscription: $(AZURE_SERVICE_CONNECTION)
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      set -euo pipefail
+
+                      STATE="$(az aks show -g "$(AKS_RG)" -n "$(AKS_NAME)" --query powerState.code -o tsv 2>/dev/null || echo Unknown)"
+                      echo "AKS powerState: ${STATE}"
+                      if [ "${STATE}" != "Running" ]; then
+                        echo "AKS is not Running. Skipping deploy."
+                        exit 0
+                      fi
+
+                      az aks install-cli
+                      az aks get-credentials -g "$(AKS_RG)" -n "$(AKS_NAME)" --overwrite-existing
+                      kubectl version --client=true
+
+                      python3 - <<'PY'
+                      import os, re, sys
+                      path = os.environ["KUSTOM_FILE"]
+                      tag = os.environ["IMAGE_TAG"]
+                      with open(path, "r", encoding="utf-8") as f:
+                        s = f.read()
+                      s2 = re.sub(r'(?m)^\\s*newTag:\\s*.*$', f'    newTag: {tag}', s)
+                      if s2 == s:
+                        print(f"Failed to update newTag in {path}", file=sys.stderr)
+                        sys.exit(2)
+                      with open(path, "w", encoding="utf-8") as f:
+                        f.write(s2)
+                      print(f"Updated {path} newTag -> {tag}")
+                      PY
+
+                      kubectl diff -k "$(OVERLAY)" || true
+                      kubectl apply -k "$(OVERLAY)"
+                      kubectl rollout status deploy/$(APP_NAME) -n "$(NAMESPACE)" --timeout=300s

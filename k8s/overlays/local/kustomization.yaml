@@ -2,6 +2,5 @@ resources:
   - ../../base
 
 images:
-  - name: acraksplatformdev6cf43o.azurecr.io/demo-app:PLACEHOLDER
-    newName: demo-app
-    newTag: local
+  - name: acraksplatformdev6cf43o.azurecr.io/demo-app
+    newTag: PLACEHOLDER
